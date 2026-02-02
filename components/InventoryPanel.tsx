@@ -5,7 +5,7 @@ import {
   AlertTriangle, CheckCircle2, TrendingUp, PackageX,
   ArrowRight, Database, ShoppingCart, Monitor, Copy, History, Edit, Save, CalendarPlus,
   Settings, ArrowDownToLine, ArrowUpFromLine, Truck, ArrowUpDown, ChevronUp, ChevronDown, Clock,
-  Hourglass, SearchCode, Eye, CopyCheck, ListPlus
+  Hourglass, SearchCode, Eye, CopyCheck, ListPlus, HelpCircle, FileText
 } from 'lucide-react';
 import { calculateRestockPlan } from '../utils/inventory';
 import { RestockRecommendation, DisplayInfo } from '../types';
@@ -85,14 +85,102 @@ const FileUploadBox = ({ label, description, file, onChange, multiple = false }:
   </div>
 );
 
+// --- Help Modal ---
+const HelpModal = ({ onClose }: { onClose: () => void }) => (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+        <div className="bg-[#1b1b1b] border border-gray-700 rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="px-6 py-4 border-b border-gray-800 bg-[#121212] flex justify-between items-center">
+                <div className="flex items-center space-x-2">
+                    <HelpCircle className="w-5 h-5 text-orange-500" />
+                    <h3 className="font-bold text-white text-lg">Hướng Dẫn Sử Dụng Hệ Thống</h3>
+                </div>
+                <button onClick={onClose} className="text-gray-400 hover:text-white"><X className="w-6 h-6" /></button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto space-y-8 text-gray-300">
+                <section>
+                    <h4 className="text-orange-400 font-bold text-base mb-3 border-b border-gray-700 pb-2">1. Nhập Dữ Liệu (Quan Trọng)</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="bg-[#252525] p-4 rounded-lg">
+                            <h5 className="font-bold text-white mb-2">File Kho Chính (Của Bạn)</h5>
+                            <p className="text-sm text-gray-400 mb-2">Đây là file tồn kho tại chi nhánh bạn đang ngồi (VD: Bình Thạnh, Quận 9...).</p>
+                            <ul className="list-disc list-inside text-xs space-y-1 text-gray-500">
+                                <li>Hệ thống sẽ dùng file này để tính toán xem bạn đang thiếu hàng gì.</li>
+                                <li>Định dạng: Excel xuất từ phần mềm kho (Cột B=Mã, Cột E=Tồn).</li>
+                            </ul>
+                        </div>
+                        <div className="bg-[#252525] p-4 rounded-lg">
+                            <h5 className="font-bold text-white mb-2">File Kho Khác / Chi Nhánh</h5>
+                            <p className="text-sm text-gray-400 mb-2">Nơi chứa các file kho từ nơi khác mà bạn có thể kéo hàng về (VD: Kho 64, Kho 7BC, Kho Q7...).</p>
+                            <ul className="list-disc list-inside text-xs space-y-1 text-gray-500">
+                                <li>Hệ thống dùng tên File làm tên Kho (VD: `Kho_Q9.xlsx` -> Kho Q9).</li>
+                                <li>Có thể chọn nhiều file cùng lúc.</li>
+                            </ul>
+                        </div>
+                    </div>
+                </section>
+
+                <section>
+                    <h4 className="text-blue-400 font-bold text-base mb-3 border-b border-gray-700 pb-2">2. Giải Thích Tính Năng</h4>
+                    <div className="space-y-4">
+                        <div>
+                            <span className="text-sm font-bold text-white bg-red-900/50 px-2 py-1 rounded border border-red-900">Nguy Cấp</span>
+                            <p className="text-sm mt-1">Sản phẩm bán chạy (có doanh số 30 ngày) nhưng tồn kho = 0 hoặc rất thấp (dưới 3 cái hoặc bán chưa được 2 ngày là hết). Cần ưu tiên nhập ngay.</p>
+                        </div>
+                        <div>
+                             <span className="text-sm font-bold text-white bg-purple-900/50 px-2 py-1 rounded border border-purple-900">QL Trưng Bày</span>
+                             <p className="text-sm mt-1">Quản lý hàng mẫu trưng bày. Hệ thống tự động đề xuất:</p>
+                             <ul className="list-disc list-inside text-xs mt-1 pl-2 text-gray-400">
+                                 <li><strong className="text-blue-400">Kéo Trưng Bày:</strong> Kho chính có hàng nhưng chưa trưng -> Cần lấy ra trưng.</li>
+                                 <li><strong className="text-red-400">Trả Kho (>20N):</strong> Hàng trưng bày (Mới) đã để trên kệ quá 20 ngày -> Cần trả về kho để bán mới, tránh trôi bảo hành/cũ. (Chỉ báo khi kho trưng bày thực sự có hàng).</li>
+                                 <li><strong className="text-yellow-500">Cân Nhắc Trả:</strong> Kho trưng bày còn hàng, nhưng kho chính đã hết sạch. Có thể cân nhắc trả hàng trưng về bán cho khách nếu cần gấp.</li>
+                             </ul>
+                        </div>
+                        <div>
+                             <span className="text-sm font-bold text-white bg-orange-900/50 px-2 py-1 rounded border border-orange-900">Tồn Lâu</span>
+                             <p className="text-sm mt-1">So sánh tồn kho thực tế với File "Hàng tồn lâu" để phát hiện lệch kho hoặc nhắc nhở đẩy hàng.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <section>
+                    <h4 className="text-green-400 font-bold text-base mb-3 border-b border-gray-700 pb-2">3. Mẹo Sử Dụng</h4>
+                    <ul className="list-disc list-inside text-sm space-y-2 text-gray-300">
+                        <li><strong>Cập nhật Tình Trạng Trưng Bày:</strong> Bạn có thể bấm vào nút <Edit className="w-3 h-3 inline"/> trong bảng để sửa ngày bắt đầu trưng hoặc tình trạng (Mới/Cũ). Bạn có thể tự nhập tình trạng khác (VD: "Mất hộp").</li>
+                        <li><strong>Tra Cứu List/Promo:</strong> Dán một danh sách mã vào ô bên trái để kiểm tra nhanh tồn kho và trạng thái trưng bày của riêng danh sách đó.</li>
+                        <li><strong>Đa Chi Nhánh:</strong> Ứng dụng này dùng được cho mọi chi nhánh. Chỉ cần bạn nạp đúng File Tồn Kho Của Bạn vào ô đầu tiên, và các file kho khác vào ô "Kho Khác".</li>
+                    </ul>
+                </section>
+            </div>
+            
+            <div className="p-4 bg-[#121212] border-t border-gray-800 text-center">
+                <button onClick={onClose} className="px-6 py-2 bg-orange-500 text-black font-bold rounded-lg hover:bg-orange-600 transition-colors">
+                    Đã Hiểu
+                </button>
+            </div>
+        </div>
+    </div>
+);
+
 // --- Edit Modal Component ---
-const EditDisplayModal = ({ item, onClose, onSave }: { item: RestockRecommendation, onClose: () => void, onSave: (date: string, condition: DisplayInfo['condition']) => void }) => {
+const EditDisplayModal = ({ item, onClose, onSave }: { item: RestockRecommendation, onClose: () => void, onSave: (date: string, condition: string) => void }) => {
     const [startDate, setStartDate] = useState(item.displayInfo?.startDate || new Date().toISOString().split('T')[0]);
-    const [condition, setCondition] = useState<DisplayInfo['condition']>(item.displayInfo?.condition || 'New');
+    // Allow condition to be edited freely
+    const [condition, setCondition] = useState<string>(item.displayInfo?.condition || 'New');
+    const [isCustom, setIsCustom] = useState(false);
+
+    // Predefined options
+    const options = [
+        { val: 'New', label: 'Mới (New)' },
+        { val: 'Scratched', label: 'Trầy xước' },
+        { val: 'Used', label: 'Đã dùng / Cũ' }
+    ];
+
+    const isPredefined = options.some(o => o.val === condition);
 
     return (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-            <div className="bg-[#1b1b1b] border border-orange-500 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in zoom-in duration-200">
+            <div className="bg-[#1b1b1b] border border-orange-500 rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
                 <div className="px-6 py-4 border-b border-gray-800 bg-black flex justify-between items-center">
                     <h3 className="font-bold text-white">Cập nhật Trưng Bày</h3>
                     <button onClick={onClose} className="text-gray-400 hover:text-white"><X className="w-5 h-5" /></button>
@@ -117,15 +205,39 @@ const EditDisplayModal = ({ item, onClose, onSave }: { item: RestockRecommendati
                         </div>
                         <div>
                             <label className="text-xs font-bold text-gray-500 uppercase block mb-1">Tình trạng</label>
-                            <select 
-                                value={condition}
-                                onChange={(e) => setCondition(e.target.value as any)}
-                                className="w-full border border-gray-700 bg-black text-white rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-orange-500 outline-none"
-                            >
-                                <option value="New">Mới (New)</option>
-                                <option value="Scratched">Trầy xước</option>
-                                <option value="Used">Đã dùng / Cũ</option>
-                            </select>
+                            <div className="relative">
+                                {isCustom || !isPredefined ? (
+                                    <div className="flex space-x-1">
+                                         <input 
+                                            type="text"
+                                            value={condition}
+                                            onChange={(e) => setCondition(e.target.value)}
+                                            placeholder="Nhập tình trạng..."
+                                            className="w-full border border-gray-700 bg-black text-white rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-orange-500 outline-none"
+                                            autoFocus
+                                        />
+                                        <button 
+                                            onClick={() => { setIsCustom(false); setCondition('New'); }}
+                                            className="px-2 bg-gray-800 text-gray-400 rounded-lg hover:bg-gray-700"
+                                            title="Chọn từ danh sách"
+                                        >
+                                            <ListPlus className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <select 
+                                        value={condition}
+                                        onChange={(e) => {
+                                            if (e.target.value === 'CUSTOM') setIsCustom(true);
+                                            else setCondition(e.target.value);
+                                        }}
+                                        className="w-full border border-gray-700 bg-black text-white rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-orange-500 outline-none appearance-none"
+                                    >
+                                        {options.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
+                                        <option value="CUSTOM">+ Khác (Nhập tay)</option>
+                                    </select>
+                                )}
+                            </div>
                         </div>
                     </div>
 
@@ -157,6 +269,7 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
   const [whFiles, setWhFiles] = useState<File[]>([]);
   const [rawResults, setRawResults] = useState<RestockRecommendation[]>([]);
   const [isCalculating, setIsCalculating] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   
   // Promo / List Check
   const [promoInput, setPromoInput] = useState('');
@@ -194,7 +307,7 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
 
   const handleCalculate = async () => {
     if (!btFile || !tkFile) {
-        alert("Vui lòng tải lên đủ File Tồn Kho (BT) và File Bán Hàng (TK) để tính toán.");
+        alert("Vui lòng tải lên đủ File Tồn Kho và File Bán Hàng để tính toán.");
         return;
     }
     
@@ -216,7 +329,7 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
     }, 100);
   };
 
-  const handleUpdateDisplay = (startDate: string, condition: DisplayInfo['condition']) => {
+  const handleUpdateDisplay = (startDate: string, condition: string) => {
       if (!editingItem) return;
 
       setRawResults(prev => prev.map(item => {
@@ -310,7 +423,8 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
       discontinued: rawResults.filter(r => r.isDiscontinued).length,
       displayIssues: rawResults.filter(r => {
           const daysDisp = getDaysDisplayed(r.displayInfo?.startDate);
-          const isReturnNeeded = daysDisp > 20 && r.displayInfo?.condition === 'New';
+          // FIX: Only consider return needed if TBA stock > 0
+          const isReturnNeeded = r.currentStockTBA > 0 && daysDisp > 20 && r.displayInfo?.condition === 'New';
           return r.isTbaSolo || r.shouldDisplay || isReturnNeeded || (r.tbaMaxStock < 1);
       }).length,
       slowMoving: rawResults.filter(r => !!r.slowStockInfo).length,
@@ -369,7 +483,10 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
                 if (!r.isDiscontinued) return false;
                 break;
             case 'DISPLAY_CHECK':
-                const relevant = r.currentStockTBA > 0 || r.shouldDisplay || r.isTbaSolo || r.tbaMaxStock > 0;
+                // FIX: Filter needs to match the Stats logic
+                const daysDisp = getDaysDisplayed(r.displayInfo?.startDate);
+                const isReturnNeeded = r.currentStockTBA > 0 && daysDisp > 20 && r.displayInfo?.condition === 'New';
+                const relevant = r.currentStockTBA > 0 || r.shouldDisplay || r.isTbaSolo || r.tbaMaxStock > 0 || isReturnNeeded;
                 if (!relevant) return false;
                 break;
             case 'SLOW_MOVING':
@@ -397,7 +514,8 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
             
             if (filterStatus !== 'ALL') {
                  const daysDisp = getDaysDisplayed(r.displayInfo?.startDate);
-                 const isReturnNeeded = daysDisp > 20 && r.displayInfo?.condition === 'New';
+                 // FIX: Logic consistency in filter
+                 const isReturnNeeded = r.currentStockTBA > 0 && daysDisp > 20 && r.displayInfo?.condition === 'New';
                  const isMissingMax = r.tbaMaxStock < 1;
 
                  if (filterStatus === 'Cân nhắc trả' && !r.isTbaSolo) return false;
@@ -453,8 +571,8 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
         'Mã SP': r.code,
         'Tên SP': r.name,
         'Loại': r.category,
-        'Tồn BT': r.currentStockBT,
-        'Tồn TBA (Thực tế)': r.currentStockTBA,
+        'Tồn Kho Chính': r.currentStockBT,
+        'Tồn TBA/Kho Khác': r.currentStockTBA,
         'Định Mức Trưng (TBA Max)': r.tbaMaxStock,
         'Bán 30N': r.sold30Days,
         'Cần Kéo': r.needsRestock,
@@ -473,6 +591,9 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
 
   return (
     <div className="absolute inset-0 bg-black text-gray-200 z-50 flex flex-col font-sans">
+      {/* Help Modal */}
+      {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
+      
       {/* Edit Modal */}
       {editingItem && (
           <EditDisplayModal 
@@ -490,6 +611,14 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
               <span className="text-white mr-1">Inventory&Display</span>
               <span className="bg-orange-500 text-black px-2 rounded-md pb-1 pt-0.5">hub</span>
             </div>
+            
+            <button 
+                onClick={() => setShowHelp(true)}
+                className="ml-4 text-xs flex items-center space-x-1 text-gray-500 hover:text-orange-400 transition-colors border border-gray-800 hover:border-orange-500 rounded-full px-2 py-1"
+            >
+                <HelpCircle className="w-4 h-4" />
+                <span>Hướng dẫn</span>
+            </button>
         </div>
         <button onClick={onClose} className="p-2 hover:bg-gray-800 rounded-full text-gray-400 hover:text-white transition-colors">
             <X className="w-6 h-6" />
@@ -503,8 +632,8 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
             <div className="p-6 flex-1 overflow-y-auto">
                 <h3 className="text-xs font-bold text-orange-500 uppercase tracking-wider mb-6">1. Nhập Dữ Liệu Nguồn</h3>
                 <FileUploadBox 
-                    label="File Tồn Kho Bình Thạnh"
-                    description="File Excel chứa tồn kho hiện tại (BT_all)."
+                    label="File Kho Chính (Của Bạn)"
+                    description="File tồn kho chi nhánh hiện tại (VD: BT, Q9...)."
                     file={btFile}
                     onChange={(e: any) => handleFileChange(e, 'BT')}
                 />
@@ -528,8 +657,8 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
                 />
                 <div className="border-t border-gray-700 my-4"></div>
                 <FileUploadBox 
-                    label="File TBA & Kho Nhánh"
-                    description="Chọn file TBA và các kho khác. TBA tự động nhận diện."
+                    label="File Kho Khác / Chi Nhánh"
+                    description="Chọn file kho các nơi khác (TBA, 64, 7BC...) để kéo hàng."
                     file={whFiles}
                     multiple={true}
                     onChange={(e: any) => handleFileChange(e, 'WH')}
@@ -588,6 +717,9 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
                     <p className="max-w-md text-center mt-2 text-sm text-gray-600">
                         Vui lòng nhập các file Excel ở cột bên trái và nhấn "Tính Toán Ngay".
                     </p>
+                    <button onClick={() => setShowHelp(true)} className="mt-4 text-blue-500 hover:text-blue-400 text-sm font-medium underline">
+                        Xem hướng dẫn sử dụng
+                    </button>
                 </div>
             ) : (
                 <>
@@ -614,7 +746,7 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
                         <StatCard 
                             title="Hàng Mới" 
                             value={stats.newArrivals} 
-                            subtext="Chưa có ở BT"
+                            subtext="Chưa có ở kho này"
                             icon={CheckCircle2} 
                             colorClass="bg-blue-500 text-blue-500" 
                             active={quickFilter === 'NEW'}
@@ -767,7 +899,7 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
                                                  <th className="px-4 py-4 text-center text-blue-400 bg-blue-900/20 min-w-[120px]">
                                                      <div className="flex flex-col items-center gap-1">
                                                         <button onClick={() => handleSort('currentStockBT')} className="flex items-center gap-1 hover:text-blue-300 mb-1">
-                                                            Tồn BT
+                                                            Tồn Chính
                                                             {sortConfig?.key === 'currentStockBT' && (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3"/> : <ChevronDown className="w-3 h-3"/>)}
                                                         </button>
                                                         <select 
@@ -784,7 +916,7 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
                                                  </th>
                                                  <th className="px-4 py-4 text-center text-purple-400 bg-purple-900/20 cursor-pointer hover:bg-purple-900/30" onClick={() => handleSort('currentStockTBA')}>
                                                       <div className="flex items-center justify-center gap-1">
-                                                        Tồn TBA / Max
+                                                        Tồn Khác / Max
                                                         {sortConfig?.key === 'currentStockTBA' && (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3"/> : <ChevronDown className="w-3 h-3"/>)}
                                                      </div>
                                                  </th>
@@ -820,7 +952,7 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
                                                 <th className="px-4 py-4 text-center min-w-[100px]">
                                                     <div className="flex flex-col items-center gap-1">
                                                         <button onClick={() => handleSort('currentStockBT')} className="flex items-center gap-1 hover:text-orange-500">
-                                                            Tồn BT
+                                                            Tồn Chính
                                                             {sortConfig?.key === 'currentStockBT' && (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3"/> : <ChevronDown className="w-3 h-3"/>)}
                                                         </button>
                                                         <select 
@@ -841,7 +973,7 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
                                                         <th className="px-4 py-4 text-center min-w-[100px]">
                                                             <div className="flex flex-col items-center gap-1">
                                                                 <button onClick={() => handleSort('currentStockTBA')} className="flex items-center gap-1 hover:text-orange-500">
-                                                                    Tồn TBA
+                                                                    Tồn Kho Khác
                                                                     {sortConfig?.key === 'currentStockTBA' && (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3"/> : <ChevronDown className="w-3 h-3"/>)}
                                                                 </button>
                                                                 <select 
@@ -884,7 +1016,7 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
                                                     </>
                                                 ) : (
                                                     <>
-                                                        <th className="px-4 py-4 text-center">Tồn TBA</th>
+                                                        <th className="px-4 py-4 text-center">Tồn Khác</th>
                                                         <th className="px-4 py-4 text-center" onClick={() => handleSort('sold30Days')}>
                                                             <div className="flex items-center justify-center gap-1 cursor-pointer hover:text-orange-500">
                                                                 Bán 30N 
@@ -916,7 +1048,8 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
                                         
                                         const daysDisp = getDaysDisplayed(r.displayInfo?.startDate);
                                         const condition = r.displayInfo?.condition || 'Unknown';
-                                        const isReturnNeeded = daysDisp > 20 && condition === 'New';
+                                        // FIX: Ensure stock > 0 for return logic in render as well
+                                        const isReturnNeeded = r.currentStockTBA > 0 && daysDisp > 20 && condition === 'New';
 
                                         // Supplier Logic
                                         const needExternalSupply = r.missingQuantity > 0;
@@ -1069,7 +1202,8 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
                                                                         <div className={`text-[10px] px-1.5 py-0.5 rounded border ${
                                                                             r.displayInfo.condition === 'New' ? 'bg-blue-900/20 text-blue-400 border-blue-900' :
                                                                             r.displayInfo.condition === 'Scratched' ? 'bg-orange-900/20 text-orange-400 border-orange-900' :
-                                                                            'bg-gray-800 text-gray-400 border-gray-700'
+                                                                            r.displayInfo.condition === 'Used' ? 'bg-gray-800 text-gray-400 border-gray-700' :
+                                                                            'bg-[#1a1a1a] text-gray-300 border-gray-600'
                                                                         }`}>
                                                                             {r.displayInfo.condition === 'New' ? 'Mới' : 
                                                                             r.displayInfo.condition === 'Scratched' ? 'Trầy xước' : 
