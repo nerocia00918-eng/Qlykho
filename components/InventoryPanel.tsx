@@ -113,7 +113,7 @@ const HelpModal = ({ onClose }: { onClose: () => void }) => (
                             <h5 className="font-bold text-white mb-2">File Kho Khác / Chi Nhánh</h5>
                             <p className="text-sm text-gray-400 mb-2">Nơi chứa các file kho từ nơi khác mà bạn có thể kéo hàng về (VD: Kho 64, Kho 7BC, Kho Q7...).</p>
                             <ul className="list-disc list-inside text-xs space-y-1 text-gray-500">
-                                <li>Hệ thống dùng tên File làm tên Kho (VD: `Kho_Q9.xlsx` &rarr; Kho Q9).</li>
+                                <li>Hệ thống dùng tên File làm tên Kho (VD: `Kho_Q9.xlsx` -> Kho Q9).</li>
                                 <li>Có thể chọn nhiều file cùng lúc.</li>
                             </ul>
                         </div>
@@ -131,8 +131,8 @@ const HelpModal = ({ onClose }: { onClose: () => void }) => (
                              <span className="text-sm font-bold text-white bg-purple-900/50 px-2 py-1 rounded border border-purple-900">QL Trưng Bày</span>
                              <p className="text-sm mt-1">Quản lý hàng mẫu trưng bày. Hệ thống tự động đề xuất:</p>
                              <ul className="list-disc list-inside text-xs mt-1 pl-2 text-gray-400">
-                                 <li><strong className="text-blue-400">Kéo Trưng Bày:</strong> Kho chính có hàng nhưng chưa trưng &rarr; Cần lấy ra trưng.</li>
-                                 <li><strong className="text-red-400">Trả Kho (&gt;20N):</strong> Hàng trưng bày (Mới) đã để trên kệ quá 20 ngày &rarr; Cần trả về kho để bán mới, tránh trôi bảo hành/cũ. (Chỉ báo khi kho trưng bày thực sự có hàng).</li>
+                                 <li><strong className="text-blue-400">Kéo Trưng Bày:</strong> Kho chính có hàng nhưng chưa trưng -> Cần lấy ra trưng.</li>
+                                 <li><strong className="text-red-400">Trả Kho (&gt;20N):</strong> Hàng trưng bày (Mới) đã để trên kệ quá 20 ngày -> Cần trả về kho để bán mới, tránh trôi bảo hành/cũ. (Chỉ báo khi kho trưng bày thực sự có hàng).</li>
                                  <li><strong className="text-yellow-500">Cân Nhắc Trả:</strong> Kho trưng bày còn hàng, nhưng kho chính đã hết sạch. Có thể cân nhắc trả hàng trưng về bán cho khách nếu cần gấp.</li>
                              </ul>
                         </div>
@@ -1193,24 +1193,32 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
                                                                 {/* Show existing display info if present */}
                                                                 {r.displayInfo && (
                                                                     <div className="mt-2 flex flex-col items-center gap-1">
-                                                                        <div className={`text-[10px] font-bold flex items-center justify-center space-x-1 ${daysDisp > 15 ? 'text-orange-500' : 'text-gray-500'}`}>
-                                                                            <Clock className="w-3 h-3" />
-                                                                            <span>{daysDisp} ngày</span>
-                                                                        </div>
-                                                                        
-                                                                        {/* Condition Label */}
-                                                                        <div className={`text-[10px] px-1.5 py-0.5 rounded border ${
-                                                                            r.displayInfo.condition === 'New' ? 'bg-blue-900/20 text-blue-400 border-blue-900' :
-                                                                            r.displayInfo.condition === 'Scratched' ? 'bg-orange-900/20 text-orange-400 border-orange-900' :
-                                                                            r.displayInfo.condition === 'Used' ? 'bg-gray-800 text-gray-400 border-gray-700' :
-                                                                            'bg-[#1a1a1a] text-gray-300 border-gray-600'
-                                                                        }`}>
-                                                                            {r.displayInfo.condition === 'New' ? 'Mới' : 
-                                                                            r.displayInfo.condition === 'Scratched' ? 'Trầy xước' : 
-                                                                            r.displayInfo.condition === 'Used' ? 'Đã dùng' : r.displayInfo.condition}
-                                                                        </div>
+                                                                        {r.currentStockTBA > 0 ? (
+                                                                            <>
+                                                                                <div className={`text-[10px] font-bold flex items-center justify-center space-x-1 ${daysDisp > 15 ? 'text-orange-500' : 'text-gray-500'}`}>
+                                                                                    <Clock className="w-3 h-3" />
+                                                                                    <span>{daysDisp} ngày</span>
+                                                                                </div>
+                                                                                
+                                                                                {/* Condition Label */}
+                                                                                <div className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                                                                                    r.displayInfo.condition === 'New' ? 'bg-blue-900/20 text-blue-400 border-blue-900' :
+                                                                                    r.displayInfo.condition === 'Scratched' ? 'bg-orange-900/20 text-orange-400 border-orange-900' :
+                                                                                    r.displayInfo.condition === 'Used' ? 'bg-gray-800 text-gray-400 border-gray-700' :
+                                                                                    'bg-[#1a1a1a] text-gray-300 border-gray-600'
+                                                                                }`}>
+                                                                                    {r.displayInfo.condition === 'New' ? 'Mới' : 
+                                                                                    r.displayInfo.condition === 'Scratched' ? 'Trầy xước' : 
+                                                                                    r.displayInfo.condition === 'Used' ? 'Đã dùng' : r.displayInfo.condition}
+                                                                                </div>
 
-                                                                        <span className="text-[9px] text-gray-600">({r.displayInfo.startDate})</span>
+                                                                                <span className="text-[9px] text-gray-600">({r.displayInfo.startDate})</span>
+                                                                            </>
+                                                                        ) : (
+                                                                            <span className="text-[10px] text-gray-500 italic">
+                                                                                Lịch sử: {r.displayInfo.startDate}
+                                                                            </span>
+                                                                        )}
                                                                     </div>
                                                                 )}
                                                             </td>
