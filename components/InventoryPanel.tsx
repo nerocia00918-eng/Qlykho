@@ -5,7 +5,7 @@ import {
   AlertTriangle, CheckCircle2, TrendingUp, PackageX,
   ArrowRight, Database, ShoppingCart, Monitor, Copy, History, Edit, Save, CalendarPlus,
   Settings, ArrowDownToLine, ArrowUpFromLine, Truck, ArrowUpDown, ChevronUp, ChevronDown, Clock,
-  Hourglass, SearchCode, Eye, CopyCheck, ListPlus, HelpCircle, FileText
+  Hourglass, SearchCode, Eye, CopyCheck, ListPlus, CircleHelp, FileText
 } from 'lucide-react';
 import { calculateRestockPlan } from '../utils/inventory';
 import { RestockRecommendation, DisplayInfo } from '../types';
@@ -91,7 +91,7 @@ const HelpModal = ({ onClose }: { onClose: () => void }) => (
         <div className="bg-[#1b1b1b] border border-gray-700 rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
             <div className="px-6 py-4 border-b border-gray-800 bg-[#121212] flex justify-between items-center">
                 <div className="flex items-center space-x-2">
-                    <HelpCircle className="w-5 h-5 text-orange-500" />
+                    <CircleHelp className="w-5 h-5 text-orange-500" />
                     <h3 className="font-bold text-white text-lg">Hướng Dẫn Sử Dụng Hệ Thống</h3>
                 </div>
                 <button onClick={onClose} className="text-gray-400 hover:text-white"><X className="w-6 h-6" /></button>
@@ -616,7 +616,7 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
                 onClick={() => setShowHelp(true)}
                 className="ml-4 text-xs flex items-center space-x-1 text-gray-500 hover:text-orange-400 transition-colors border border-gray-800 hover:border-orange-500 rounded-full px-2 py-1"
             >
-                <HelpCircle className="w-4 h-4" />
+                <CircleHelp className="w-4 h-4" />
                 <span>Hướng dẫn</span>
             </button>
         </div>
