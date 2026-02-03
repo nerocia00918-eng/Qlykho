@@ -5,7 +5,7 @@ import {
   AlertTriangle, CheckCircle2, TrendingUp, PackageX,
   ArrowRight, Database, ShoppingCart, Monitor, Copy, History, Edit, Save, CalendarPlus,
   Settings, ArrowDownToLine, ArrowUpFromLine, Truck, ArrowUpDown, ChevronUp, ChevronDown, Clock,
-  Hourglass, SearchCode, Eye, CopyCheck, ListPlus, CircleHelp, FileText, CalendarCheck
+  Hourglass, SearchCode, Eye, CopyCheck, ListPlus, CircleHelp, FileText, CalendarCheck, Trash2
 } from 'lucide-react';
 import { calculateRestockPlan } from '../utils/inventory';
 import { RestockRecommendation, DisplayInfo } from '../types';
@@ -23,6 +23,14 @@ interface SortConfig {
 }
 
 type QuickFilterType = 'ALL' | 'CRITICAL' | 'NORMAL_RESTOCK' | 'NEW' | 'DISCONTINUED' | 'DISPLAY_CHECK' | 'SLOW_MOVING' | 'PROMO_CHECK';
+
+const STORAGE_KEY = 'SMARTSHEETS_DISPLAY_HISTORY';
+
+interface DateConflictItem {
+    code: string;
+    existingDate: string;
+    newDate: string;
+}
 
 const StatCard = ({ title, value, subtext, icon: Icon, colorClass, onClick, active }: any) => (
   <div 
@@ -206,6 +214,64 @@ const ZeroStockConfirmModal = ({ items, onConfirm, onCancel }: { items: string[]
     </div>
 );
 
+// --- Confirmation Modal for DATE Conflict ---
+const DateConflictModal = ({ items, onOverwrite, onKeepOld }: { items: DateConflictItem[], onOverwrite: () => void, onKeepOld: () => void }) => (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in zoom-in duration-200">
+        <div className="bg-[#1b1b1b] border border-red-500 rounded-xl shadow-2xl w-full max-w-lg overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-800 bg-black flex justify-between items-center">
+                <div className="flex items-center space-x-2 text-red-500">
+                    <CalendarCheck className="w-5 h-5" />
+                    <h3 className="font-bold text-white">Xung đột ngày cập nhật</h3>
+                </div>
+            </div>
+            
+            <div className="p-6 space-y-4">
+                <p className="text-gray-300 text-sm">
+                    Có <strong className="text-white">{items.length}</strong> sản phẩm có ngày cập nhật trước đó <strong>MỚI HƠN</strong> ngày bạn đang chọn.
+                </p>
+                <div className="bg-[#121212] border border-gray-800 rounded-lg p-3 max-h-40 overflow-y-auto">
+                    <table className="w-full text-xs text-left">
+                        <thead className="text-gray-500 border-b border-gray-700">
+                            <tr>
+                                <th className="pb-1">Mã</th>
+                                <th className="pb-1 text-green-500">Đang có (Mới hơn)</th>
+                                <th className="pb-1 text-red-500">Bạn chọn (Cũ hơn)</th>
+                            </tr>
+                        </thead>
+                        <tbody className="text-gray-400">
+                            {items.map((item, idx) => (
+                                <tr key={idx} className="border-b border-gray-800/50 last:border-0">
+                                    <td className="py-1 font-bold">{item.code}</td>
+                                    <td className="py-1 text-green-400">{item.existingDate}</td>
+                                    <td className="py-1 text-red-400">{item.newDate}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+                <p className="text-sm text-gray-400">
+                    Bạn có muốn dùng ngày của lần cập nhật này không?
+                </p>
+            </div>
+
+            <div className="px-6 py-4 bg-black border-t border-gray-800 flex justify-end space-x-3">
+                <button 
+                    onClick={onKeepOld}
+                    className="px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-800 rounded-lg transition-colors border border-gray-700"
+                >
+                    Không (Giữ ngày cũ)
+                </button>
+                <button 
+                    onClick={onOverwrite}
+                    className="px-4 py-2 text-sm bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 transition-colors shadow-sm"
+                >
+                    Có (Ghi đè bằng ngày này)
+                </button>
+            </div>
+        </div>
+    </div>
+);
+
 
 // --- Edit Modal Component ---
 const EditDisplayModal = ({ item, onClose, onSave }: { item: RestockRecommendation, onClose: () => void, onSave: (date: string, condition: string) => void }) => {
@@ -319,8 +385,12 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
   // Promo / List Check
   const [promoInput, setPromoInput] = useState('');
   const [bulkDate, setBulkDate] = useState(new Date().toISOString().split('T')[0]);
-  const [zeroStockItems, setZeroStockItems] = useState<string[]>([]); // For modal
   
+  // Modal States
+  const [zeroStockItems, setZeroStockItems] = useState<string[]>([]);
+  const [conflictItems, setConflictItems] = useState<DateConflictItem[]>([]);
+  const [pendingBulkUpdates, setPendingBulkUpdates] = useState<string[]>([]);
+
   // Editing State
   const [editingItem, setEditingItem] = useState<RestockRecommendation | null>(null);
 
@@ -342,6 +412,39 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
   const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
 
   // --- Logic ---
+  
+  // --- LocalStorage Helpers ---
+  const saveDisplayData = (data: RestockRecommendation[]) => {
+      try {
+          const displayMap: Record<string, {startDate: string, condition: string}> = {};
+          data.forEach(r => {
+              if (r.displayInfo) {
+                  displayMap[r.code] = r.displayInfo;
+              }
+          });
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(displayMap));
+      } catch (e) {
+          console.error("Failed to auto-save to localStorage", e);
+      }
+  };
+
+  const loadSavedDisplayData = (freshData: RestockRecommendation[]): RestockRecommendation[] => {
+      try {
+          const savedStr = localStorage.getItem(STORAGE_KEY);
+          if (!savedStr) return freshData;
+          
+          const savedMap = JSON.parse(savedStr);
+          return freshData.map(r => {
+              if (savedMap[r.code]) {
+                  return { ...r, displayInfo: savedMap[r.code] };
+              }
+              return r;
+          });
+      } catch (e) {
+          console.error("Failed to load auto-save data", e);
+          return freshData;
+      }
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'BT' | 'TK' | 'WH' | 'DISP' | 'SLOW') => {
     if (!e.target.files?.length) return;
@@ -365,7 +468,11 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
     setTimeout(async () => {
         try {
             const data = await calculateRestockPlan(btFile, tkFile, whFiles, displayFile || undefined, slowFile || undefined);
-            setRawResults(data);
+            
+            // Auto-load Saved Data over calculated data
+            const mergedData = loadSavedDisplayData(data);
+            
+            setRawResults(mergedData);
             setQuickFilter('CRITICAL'); 
         } catch (error) {
             console.error(error);
@@ -376,10 +483,28 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
     }, 100);
   };
 
+  // Single Item Update Logic with Date Conflict Check
   const handleUpdateDisplay = (startDate: string, condition: string) => {
       if (!editingItem) return;
 
-      setRawResults(prev => prev.map(item => {
+      // Date Conflict Check
+      if (editingItem.displayInfo?.startDate) {
+          const existingDate = new Date(editingItem.displayInfo.startDate);
+          const newDateObj = new Date(startDate);
+          
+          if (existingDate > newDateObj) {
+              // Existing is NEWER than what user is trying to set
+              const confirmed = window.confirm(
+                  `CẢNH BÁO: Sản phẩm ${editingItem.code} đang có ngày trưng bày là ${editingItem.displayInfo.startDate} (Mới hơn ngày bạn chọn ${startDate}).\n\nBạn có chắc chắn muốn ghi đè bằng ngày cũ hơn này không?`
+              );
+              if (!confirmed) {
+                  setEditingItem(null); // Keep old, do nothing
+                  return;
+              }
+          }
+      }
+
+      const newData = rawResults.map(item => {
           if (item.code === editingItem.code) {
               return {
                   ...item,
@@ -387,7 +512,10 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
               };
           }
           return item;
-      }));
+      });
+
+      setRawResults(newData);
+      saveDisplayData(newData); // Auto-save
       setEditingItem(null);
   };
 
@@ -399,25 +527,79 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
       const foundItems = rawResults.filter(r => codes.some(c => r.code.toLowerCase().includes(c)));
       
       const zeroStock = foundItems.filter(r => r.currentStockTBA === 0).map(r => r.code);
-      const hasStock = foundItems.filter(r => r.currentStockTBA > 0).map(r => r.code);
+      const hasStockItems = foundItems.filter(r => r.currentStockTBA > 0);
+      const hasStockCodes = hasStockItems.map(r => r.code);
 
-      if (zeroStock.length > 0) {
-          // Open Modal, wait for decision
-          setZeroStockItems(zeroStock);
-          // We will process 'hasStock' immediately or wait? 
-          // Better to process 'hasStock' immediately, and process zeroStock after confirmation.
-          finalizeBulkUpdate(hasStock); 
-      } else {
-          // No issues, update all
-          finalizeBulkUpdate(hasStock);
-          alert(`Đã cập nhật ${hasStock.length} sản phẩm thành công.`);
+      // Check for Date Conflicts in 'hasStockItems' (or even zero stock ones if we track history)
+      const conflicts: DateConflictItem[] = [];
+      const newDateObj = new Date(bulkDate);
+
+      // Check conflicts in the list we are about to update
+      foundItems.forEach(item => {
+          if (item.displayInfo?.startDate) {
+              const existingDate = new Date(item.displayInfo.startDate);
+              if (existingDate > newDateObj) {
+                  conflicts.push({
+                      code: item.code,
+                      existingDate: item.displayInfo.startDate,
+                      newDate: bulkDate
+                  });
+              }
+          }
+      });
+
+      if (conflicts.length > 0) {
+          setConflictItems(conflicts);
+          // We need to know which items to process if user confirms override or keep old.
+          // Store the list of target codes to process.
+          // Actually, we need to process `zeroStock` logic separately too.
+          // Let's simplify: First resolve conflict, THEN resolve Zero Stock.
+          setPendingBulkUpdates(foundItems.map(r => r.code)); // All codes involved
+          return;
       }
+
+      // No conflicts, proceed to Zero Stock check
+      processZeroStockLogic(zeroStock, hasStockCodes);
+  };
+
+  const processZeroStockLogic = (zeroStock: string[], hasStockCodes: string[]) => {
+      if (zeroStock.length > 0) {
+          setZeroStockItems(zeroStock);
+          // Apply updates to existing stock items immediately
+          finalizeBulkUpdate(hasStockCodes); 
+      } else {
+          // No zero stock issues, update all
+          finalizeBulkUpdate(hasStockCodes);
+          alert(`Đã cập nhật ${hasStockCodes.length} sản phẩm thành công.`);
+      }
+  };
+
+  const handleConflictResolution = (overwrite: boolean) => {
+      // If overwrite is TRUE: We update EVERYTHING in pendingBulkUpdates with new date.
+      // If overwrite is FALSE: We update EVERYTHING EXCEPT the conflicted ones.
+      
+      let codesToProcess = [...pendingBulkUpdates];
+      
+      if (!overwrite) {
+          const conflictCodes = conflictItems.map(c => c.code);
+          codesToProcess = codesToProcess.filter(c => !conflictCodes.includes(c));
+      }
+      
+      // Now perform the Zero Stock check on the filtered list
+      const relevantItems = rawResults.filter(r => codesToProcess.includes(r.code));
+      const zeroStock = relevantItems.filter(r => r.currentStockTBA === 0).map(r => r.code);
+      const hasStock = relevantItems.filter(r => r.currentStockTBA > 0).map(r => r.code);
+      
+      setConflictItems([]); // Close conflict modal
+      setPendingBulkUpdates([]);
+      
+      processZeroStockLogic(zeroStock, hasStock);
   };
 
   const finalizeBulkUpdate = (codesToUpdate: string[]) => {
       if (codesToUpdate.length === 0) return;
       
-      setRawResults(prev => prev.map(item => {
+      const newData = rawResults.map(item => {
           if (codesToUpdate.includes(item.code)) {
                return {
                   ...item,
@@ -425,7 +607,9 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
                };
           }
           return item;
-      }));
+      });
+      setRawResults(newData);
+      saveDisplayData(newData); // Auto-save
   };
 
   const handleZeroStockConfirm = (saveHistory: boolean) => {
@@ -704,6 +888,15 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
           />
       )}
 
+      {/* Date Conflict Modal */}
+      {conflictItems.length > 0 && (
+          <DateConflictModal 
+            items={conflictItems} 
+            onOverwrite={() => handleConflictResolution(true)} 
+            onKeepOld={() => handleConflictResolution(false)} 
+          />
+      )}
+
       {/* 1. Top Navigation Bar - HUB STYLE */}
       <div className="bg-black border-b border-orange-500 px-6 py-4 flex items-center justify-between shadow-lg z-20">
         <div className="flex items-center space-x-3">
@@ -765,10 +958,21 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
                     onChange={(e: any) => handleFileChange(e, 'WH')}
                 />
 
-                <div className="mt-6 bg-[#2a2a2a] p-4 rounded-xl border border-gray-700">
-                    <h3 className="text-xs font-bold text-gray-300 uppercase tracking-wider mb-2 flex items-center">
-                        <SearchCode className="w-4 h-4 mr-1.5 text-orange-500" />
-                        2. Tra Cứu List / Promo
+                <div className="mt-6 bg-[#2a2a2a] p-4 rounded-xl border border-gray-700 relative">
+                    <h3 className="text-xs font-bold text-gray-300 uppercase tracking-wider mb-2 flex items-center justify-between">
+                        <div className="flex items-center">
+                            <SearchCode className="w-4 h-4 mr-1.5 text-orange-500" />
+                            2. Tra Cứu List / Promo
+                        </div>
+                        {promoInput.length > 0 && (
+                            <button 
+                                onClick={() => setPromoInput('')} 
+                                className="text-gray-500 hover:text-red-500 transition-colors p-1"
+                                title="Xóa trắng danh sách"
+                            >
+                                <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                        )}
                     </h3>
                     <textarea 
                         className="w-full border border-gray-600 rounded-lg p-3 text-xs h-24 focus:ring-1 focus:ring-orange-500 outline-none bg-[#121212] text-white placeholder-gray-600"
