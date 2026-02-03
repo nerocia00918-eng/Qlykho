@@ -238,11 +238,6 @@ export const calculateRestockPlan = async (
       const firstEntry = stock.values().next().value;
       if (firstEntry && firstEntry.whNameFromRow && firstEntry.whNameFromRow.length > 2 && !firstEntry.whNameFromRow.includes('.')) {
          // Heuristic: If Col A has a decent string, maybe use it? 
-         // For now, let's append it to filename if they differ to be safe, or just use filename.
-         // User requested logic for Col A:
-         // If filename doesn't look like a warehouse name but Col A does, prioritze Col A?
-         // Simplest: If Col A is present, assume it helps identify the warehouse.
-         // But "TBA" logic is special.
       }
 
       if (fname.includes('tba')) {
@@ -251,6 +246,7 @@ export const calculateRestockPlan = async (
         let priority = 3;
         if (fname.includes('64')) priority = 1;
         else if (fname.includes('7bc')) priority = 2;
+        // All other files (TP, Q9, etc) get priority 3, but they are included in warehouseStocks
         warehouseStocks.push({ name: whName, priority, data: stock });
       }
   });
@@ -437,8 +433,10 @@ export const calculateRestockPlan = async (
   }
 
   // 5. New Arrival Logic 
-  const centralWarehouses = warehouseStocks.filter(w => w.priority <= 2);
-  for (const wh of centralWarehouses) {
+  // User Requested: Use ALL uploaded files (except TBA) for sourcing, not just priority <= 2
+  const sourceWarehouses = warehouseStocks; 
+  
+  for (const wh of sourceWarehouses) {
       for (const [code, entry] of wh.data.entries()) {
           if (processedCodes.has(code)) continue; 
           if (entry.name.trim().startsWith('0.')) continue;
