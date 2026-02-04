@@ -44,6 +44,7 @@ export interface WarehouseItem {
 export interface SourcingPlan {
   sourceWarehouse: string;
   quantity: number;
+  sourceStock: number; // Available stock in this source warehouse
 }
 
 export interface DisplayInfo {
@@ -55,6 +56,14 @@ export interface SlowStockInfo {
     reportedStock: number; // Stock reported in the "Slow" file (Col C)
     monthsUnsold: number; // Months unsold (Col G)
 }
+
+export interface WarehouseStockInfo {
+    name: string;
+    stock: number;
+}
+
+// NEW: ABC Analysis Types
+export type ABCClass = 'A' | 'B' | 'C' | 'N'; // N for New/No Sales
 
 export interface RestockRecommendation {
   code: string;
@@ -72,6 +81,7 @@ export interface RestockRecommendation {
   needsRestock: number; // Amount needed
   canPull: number; // Amount actually found in other warehouses
   sourcing: SourcingPlan[];
+  allWarehousesStock: WarehouseStockInfo[];
   status: 'Critical' | 'Warning' | 'Healthy' | 'Overstock' | 'Review'; // Updated status
   missingQuantity: number; // needsRestock - canPull
   isDiscontinued: boolean; // True if name starts with "0."
@@ -81,4 +91,10 @@ export interface RestockRecommendation {
   isTbaSolo: boolean; // NEW: TBA > 0 but BT = 0
   shouldDisplay: boolean; // NEW: BT > 0, !Discontinued, needs display
   slowStockInfo?: SlowStockInfo; // NEW: Data from "Slow" file
+  
+  // NEW FIELDS FOR ANALYTICS
+  price: number;
+  revenue30Days: number;
+  abcClass: ABCClass;
+  safetyStockAdjustment: number; // Suggested extra stock based on class
 }

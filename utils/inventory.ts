@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { RestockRecommendation, SourcingPlan, WarehouseItem, DisplayInfo, SlowStockInfo } from '../types';
+import { RestockRecommendation, SourcingPlan, WarehouseItem, DisplayInfo, SlowStockInfo, WarehouseStockInfo, ABCClass } from '../types';
 
 // Optimization: Use a Prefix Map instead of linear if-else scan
 const PREFIX_MAP: Record<string, string> = {
@@ -59,8 +59,9 @@ export const parseWarehouseFile = async (file: File): Promise<Map<string, WhEntr
   data.forEach((row: any[]) => {
     if (!row || row.length < 2) return; 
     
-    // Assuming Col A (Index 0) might be Warehouse Name, Col B (Index 1) is Code
+    // Column A (Index 0) is Warehouse Name
     const whNameInRow = String(row[0] || '').trim();
+    // Column B (Index 1) is Code
     const code = String(row[1] || '').trim(); 
     
     if (!code || code === 'Mã SP') return; 
@@ -76,7 +77,19 @@ export const parseWarehouseFile = async (file: File): Promise<Map<string, WhEntr
     }
 
     if (code) {
-      stockMap.set(code, { stock, maxStock, name, whNameFromRow: whNameInRow });
+      // Logic change: Warehouses typically shouldn't have duplicate codes, 
+      // but if they do, we should probably sum them too to be safe.
+      const current = stockMap.get(code);
+      if (current) {
+         stockMap.set(code, { 
+             ...current, 
+             stock: current.stock + stock,
+             // Keep the max of maxStock if duplicated
+             maxStock: Math.max(current.maxStock, maxStock) 
+         });
+      } else {
+         stockMap.set(code, { stock, maxStock, name, whNameFromRow: whNameInRow });
+      }
     }
   });
   return stockMap;
@@ -84,7 +97,8 @@ export const parseWarehouseFile = async (file: File): Promise<Map<string, WhEntr
 
 export const parseBTFile = async (file: File): Promise<WarehouseItem[]> => {
   const data = await readFileToJson(file);
-  const items: WarehouseItem[] = [];
+  // Use a map first to handle duplicates in BT file if any
+  const itemMap = new Map<string, WarehouseItem>();
 
   data.forEach((row: any[]) => {
     if (!row || row.length < 3) return;
@@ -94,6 +108,7 @@ export const parseBTFile = async (file: File): Promise<WarehouseItem[]> => {
 
     const name = String(row[2] || ''); 
     const currentStock = parseInt(String(row[4] || '0')); 
+    // Col 5 (Index 5) is Price usually in standard export
     const price = parseFloat(String(row[5] || '0')); 
     
     let maxStock = 9999; 
@@ -101,9 +116,18 @@ export const parseBTFile = async (file: File): Promise<WarehouseItem[]> => {
         maxStock = parseInt(String(row[24]));
     }
 
-    items.push({ code, name, currentStock, maxStock, price });
+    if (itemMap.has(code)) {
+        const existing = itemMap.get(code)!;
+        itemMap.set(code, {
+            ...existing,
+            currentStock: existing.currentStock + currentStock,
+            // If duplicate rows have different prices, we keep the first one or average? Keeping first for now.
+        });
+    } else {
+        itemMap.set(code, { code, name, currentStock, maxStock, price });
+    }
   });
-  return items;
+  return Array.from(itemMap.values());
 };
 
 export const parseStatsFile = async (file: File): Promise<Map<string, number>> => {
@@ -115,9 +139,13 @@ export const parseStatsFile = async (file: File): Promise<Map<string, number>> =
     const code = String(row[0] || '').trim();
     if (!code || code.toLowerCase() === 'mã sp') return;
 
+    // Column K is Index 10
     const sold = parseInt(String(row[10] || '0')); 
+    
     if (!isNaN(sold)) {
-        stats.set(code, sold);
+        // CRITICAL FIX: Sum the values instead of overwriting
+        const currentTotal = stats.get(code) || 0;
+        stats.set(code, currentTotal + sold);
     }
   });
   return stats;
@@ -152,11 +180,9 @@ export const parseDisplayFile = async (file: File): Promise<Map<string, DisplayI
             }
         }
 
-        // Keep raw text if possible, but map known keywords
         let condition = String(row[2] || '').trim();
         if (!condition) condition = 'New';
 
-        // Normalize specific known types for colors, but keep the text
         if (code && startDate) {
             map.set(code, { startDate, condition });
         }
@@ -171,13 +197,10 @@ export const parseSlowStockFile = async (file: File): Promise<Map<string, SlowSt
     
     data.forEach((row: any[]) => {
         if (!row || row.length < 1) return;
-        const code = String(row[0] || '').trim(); // Col A
+        const code = String(row[0] || '').trim(); 
         if (!code || code === 'Mã SP') return;
 
-        // Col C (Index 2) is Reported Stock
         const reportedStock = parseInt(String(row[2] || '0'));
-        
-        // Col G (Index 6) is Months Unsold
         const monthsUnsold = parseFloat(String(row[6] || '0'));
 
         map.set(code, { reportedStock, monthsUnsold });
@@ -190,7 +213,6 @@ const readFileToJson = (file: File): Promise<any[]> => {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        // Optimization: use array buffer which is faster for XLSX library
         const data = e.target?.result;
         const wb = XLSX.read(data, { type: 'array' });
         const ws = wb.Sheets[wb.SheetNames[0]];
@@ -200,10 +222,78 @@ const readFileToJson = (file: File): Promise<any[]> => {
         reject(err);
       }
     };
-    // Optimization: Read as ArrayBuffer instead of BinaryString
     reader.readAsArrayBuffer(file);
   });
 };
+
+// --- ABC ANALYSIS LOGIC ---
+const performABCAnalysis = (items: RestockRecommendation[]): RestockRecommendation[] => {
+    // 1. Calculate Revenue
+    const itemsWithRevenue = items.map(item => ({
+        ...item,
+        revenue30Days: item.sold30Days * item.price
+    }));
+
+    // 2. Determine Ranking Metric (Revenue vs Quantity)
+    const totalRevenue = itemsWithRevenue.reduce((sum, item) => sum + item.revenue30Days, 0);
+    const useQuantity = totalRevenue === 0; // FALLBACK: If no price/revenue data, use Sold Quantity
+    
+    // 3. Sort
+    if (useQuantity) {
+        itemsWithRevenue.sort((a, b) => b.sold30Days - a.sold30Days);
+    } else {
+        itemsWithRevenue.sort((a, b) => b.revenue30Days - a.revenue30Days);
+    }
+
+    // 4. Calculate Cumulative
+    const totalMetric = useQuantity 
+        ? itemsWithRevenue.reduce((sum, item) => sum + item.sold30Days, 0)
+        : totalRevenue;
+        
+    let runningMetric = 0;
+
+    // 5. Assign Class & Adjust Target
+    return itemsWithRevenue.map(item => {
+        let abcClass: ABCClass = 'N';
+        let safetyStockAdjustment = 0;
+
+        if (item.sold30Days > 0) {
+            runningMetric += (useQuantity ? item.sold30Days : item.revenue30Days);
+            const percentage = totalMetric > 0 ? runningMetric / totalMetric : 0;
+
+            if (percentage <= 0.80) {
+                abcClass = 'A';
+                safetyStockAdjustment = Math.ceil(item.dailyRunRate * 1.5); 
+            } else if (percentage <= 0.95) {
+                abcClass = 'B';
+                safetyStockAdjustment = 0;
+            } else {
+                abcClass = 'C';
+                safetyStockAdjustment = 0;
+            }
+        }
+
+        // Apply Dynamic Safety Stock to 'needsRestock'
+        // We add the safety buffer to the need, but clamp it reasonable
+        let adjustedNeed = item.needsRestock;
+        if (abcClass === 'A') {
+             adjustedNeed += safetyStockAdjustment;
+        }
+
+        // Recalculate need against limits
+        const spaceAvailable = Math.max(0, item.maxStock - item.currentStockBT);
+        adjustedNeed = Math.min(adjustedNeed, spaceAvailable);
+
+        return {
+            ...item,
+            abcClass,
+            safetyStockAdjustment,
+            needsRestock: adjustedNeed, // Update the need with AI/ABC forecast
+            missingQuantity: item.isDiscontinued ? 0 : Math.max(0, adjustedNeed - item.canPull)
+        };
+    });
+};
+
 
 export const calculateRestockPlan = async (
   btFile: File,
@@ -213,7 +303,6 @@ export const calculateRestockPlan = async (
   slowFile?: File
 ): Promise<RestockRecommendation[]> => {
   
-  // Optimization: Parallel Reading using Promise.all
   const [btItems, salesStats, displayMap, slowStockMap, ...otherStocksData] = await Promise.all([
       parseBTFile(btFile),
       parseStatsFile(tkFile),
@@ -222,38 +311,35 @@ export const calculateRestockPlan = async (
       ...otherFiles.map(f => parseWarehouseFile(f))
   ]);
 
-  // 2. Process Warehouse Data from parallel results
   const warehouseStocks: { name: string; priority: number; data: Map<string, WhEntry> }[] = [];
   let tbaStockMap = new Map<string, WhEntry>();
   
   otherFiles.forEach((f, index) => {
       const fname = f.name.toLowerCase();
       const stock = otherStocksData[index]; 
-      
-      // Smart Name Detection: 
-      // 1. Check filename
-      // 2. If filename is generic but data has Col A values (whNameFromRow), use that (sampled from first entry)
       let whName = f.name.replace(/\.[^/.]+$/, "");
-      
       const firstEntry = stock.values().next().value;
-      if (firstEntry && firstEntry.whNameFromRow && firstEntry.whNameFromRow.length > 2 && !firstEntry.whNameFromRow.includes('.')) {
-         // Heuristic: If Col A has a decent string, maybe use it? 
+      if (firstEntry && firstEntry.whNameFromRow) {
+          const rowName = firstEntry.whNameFromRow.trim();
+          if (rowName.length > 0 && rowName.toLowerCase() !== 'tên kho' && rowName.toLowerCase() !== 'kho') {
+              whName = rowName; 
+          }
       }
+      const checkName = whName.toLowerCase();
 
-      if (fname.includes('tba')) {
+      if (checkName.includes('tba') || checkName.includes('trưng bày') || fname.includes('tba')) {
           tbaStockMap = stock;
       } else {
         let priority = 3;
-        if (fname.includes('64')) priority = 1;
-        else if (fname.includes('7bc')) priority = 2;
-        // All other files (TP, Q9, etc) get priority 3, but they are included in warehouseStocks
+        if (checkName.includes('64')) priority = 1;
+        else if (checkName.includes('7bc')) priority = 2;
         warehouseStocks.push({ name: whName, priority, data: stock });
       }
   });
 
   warehouseStocks.sort((a, b) => a.priority - b.priority);
 
-  const recommendations: RestockRecommendation[] = [];
+  const rawRecommendations: RestockRecommendation[] = [];
   const processedCodes = new Set<string>();
 
   // 3. Calculation Loop (Main BT Items)
@@ -264,7 +350,6 @@ export const calculateRestockPlan = async (
     const sold30 = salesStats.get(item.code) || 0;
     const runRate = sold30 / 30; 
     
-    // Optimized categorize call
     const category = categorizeProduct(item.code, item.name);
     const targetDays = getTargetDays(category);
     
@@ -281,52 +366,35 @@ export const calculateRestockPlan = async (
     const tbaEntry = tbaStockMap.get(item.code);
     const currentStockTBA = tbaEntry ? tbaEntry.stock : 0;
     
-    // Logic: Use value from file if present, otherwise smart default for display items
     let tbaMaxStock = tbaEntry ? tbaEntry.maxStock : 0; 
-    
-    // Fallback: If Max is 0/Missing, but this is a category that SHOULD be displayed, default to 1.
     if (tbaMaxStock === 0 && !isDiscontinued) {
         tbaMaxStock = getDefaultDisplayStock(category);
     }
     
     const displayInfo = displayMap.get(item.code);
-
     const isDisplayLimitMissing = tbaMaxStock < 1;
-
-    // NEW LOGIC 1: TBA Solo (Exists in TBA, Empty in BT)
     const isTbaSolo = currentStockTBA > 0 && item.currentStock === 0;
-
-    // NEW LOGIC 2: Should Display
     const hasShortageAgainstMax = !isDisplayLimitMissing && currentStockTBA < tbaMaxStock;
     const hasNoDisplayButStock = isDisplayLimitMissing && currentStockTBA === 0; 
     
     const shouldDisplay = !isDiscontinued && item.currentStock > 0 && (hasShortageAgainstMax || (hasNoDisplayButStock && getDefaultDisplayStock(category) > 0));
 
-    // Logic: Return if > 20 days and New (Existing)
     let isReturnNeeded = false;
     if (currentStockTBA > 0 && displayInfo) {
         const start = new Date(displayInfo.startDate);
         const now = new Date();
         const diffTime = Math.abs(now.getTime() - start.getTime());
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
-        
-        // FIX: Added 'currentStockTBA > 0' check implicitly above, but reinforcing logic here.
-        // Also must be 'New' to trigger return suggestion
         if (diffDays > 20 && displayInfo.condition === 'New') {
             isReturnNeeded = true;
         }
     }
-    // FIX: If actual stock is 0, we certainly don't need to return anything
     if (currentStockTBA === 0) {
         isReturnNeeded = false;
     }
 
-    // SLOW STOCK LOGIC
     const slowStockInfo = slowStockMap.get(item.code);
-
-    // Inclusion Logic
     const hasDisplayIssue = shouldDisplay || isTbaSolo || isReturnNeeded || isDisplayLimitMissing;
-    // We include if there is a slow stock report for this item
     const hasSlowIssue = !!slowStockInfo;
 
     if (need <= 0 && item.currentStock > 0 && !isDiscontinued && !hasDisplayIssue && currentStockTBA === 0 && !hasSlowIssue) continue;
@@ -343,35 +411,47 @@ export const calculateRestockPlan = async (
         urgency = 'Critical';
     }
 
+    // --- GATHER ALL STOCKS ---
+    const allWarehousesStock: WarehouseStockInfo[] = [];
+    for (const wh of warehouseStocks) {
+        const entry = wh.data.get(item.code);
+        if (entry && entry.stock > 0) {
+            allWarehousesStock.push({ name: wh.name, stock: entry.stock });
+        }
+    }
+    allWarehousesStock.sort((a, b) => b.stock - a.stock);
+
     // Sourcing Logic
     const sourcing: SourcingPlan[] = [];
     let remainingNeed = need;
 
     if (need > 0) {
         for (const wh of warehouseStocks) {
-        if (remainingNeed <= 0) break;
-        
-        const entry = wh.data.get(item.code);
-        const available = entry ? entry.stock : 0;
-        
-        if (available > 0) {
-            const take = Math.min(available, remainingNeed);
-            sourcing.push({ sourceWarehouse: wh.name, quantity: take });
-            remainingNeed -= take;
-        }
+            if (remainingNeed <= 0) break;
+            const entry = wh.data.get(item.code);
+            const available = entry ? entry.stock : 0;
+            if (available > 0) {
+                const take = Math.min(available, remainingNeed);
+                sourcing.push({ 
+                    sourceWarehouse: wh.name, 
+                    quantity: take,
+                    sourceStock: available 
+                });
+                remainingNeed -= take;
+            }
         }
     }
 
     const canPull = need - remainingNeed;
     const missingQuantity = isDiscontinued ? 0 : remainingNeed;
 
-    recommendations.push({
+    rawRecommendations.push({
         code: item.code,
         name: item.name,
         category,
         currentStockBT: item.currentStock,
-        currentStockTBA, // Pass TBA stock
-        tbaMaxStock, // Pass TBA Max
+        currentStockTBA, 
+        tbaMaxStock,
         sold30Days: sold30,
         dailyRunRate: parseFloat(runRate.toFixed(2)),
         stockCoverDays: parseFloat(stockCoverDays.toFixed(1)),
@@ -381,6 +461,7 @@ export const calculateRestockPlan = async (
         needsRestock: need,
         canPull,
         sourcing,
+        allWarehousesStock,
         missingQuantity,
         status: urgency === 'Critical' ? 'Critical' : 'Warning',
         isDiscontinued,
@@ -389,21 +470,24 @@ export const calculateRestockPlan = async (
         displayInfo,
         isTbaSolo,
         shouldDisplay,
-        slowStockInfo
+        slowStockInfo,
+        price: item.price,
+        revenue30Days: 0, // Calculated later
+        abcClass: 'N', // Calculated later
+        safetyStockAdjustment: 0
     });
   }
 
   // 4. Check for Orphaned Items in TBA 
   for (const [code, entry] of tbaStockMap.entries()) {
       if (processedCodes.has(code)) continue; 
-      
       if (entry.stock > 0) {
           processedCodes.add(code);
           const category = categorizeProduct(code, entry.name);
           const isDiscontinued = entry.name.trim().startsWith('0.');
           const slowStockInfo = slowStockMap.get(code);
 
-          recommendations.push({
+          rawRecommendations.push({
               code: code,
               name: entry.name,
               category,
@@ -419,6 +503,7 @@ export const calculateRestockPlan = async (
               needsRestock: 0,
               canPull: 0,
               sourcing: [],
+              allWarehousesStock: [],
               missingQuantity: 0,
               status: 'Warning',
               isDiscontinued,
@@ -427,16 +512,17 @@ export const calculateRestockPlan = async (
               displayInfo: undefined,
               isTbaSolo: true, 
               shouldDisplay: false,
-              slowStockInfo
+              slowStockInfo,
+              price: 0,
+              revenue30Days: 0,
+              abcClass: 'N',
+              safetyStockAdjustment: 0
           });
       }
   }
 
   // 5. New Arrival Logic 
-  // User Requested: Use ALL uploaded files (except TBA) for sourcing, not just priority <= 2
-  const sourceWarehouses = warehouseStocks; 
-  
-  for (const wh of sourceWarehouses) {
+  for (const wh of warehouseStocks) {
       for (const [code, entry] of wh.data.entries()) {
           if (processedCodes.has(code)) continue; 
           if (entry.name.trim().startsWith('0.')) continue;
@@ -447,7 +533,9 @@ export const calculateRestockPlan = async (
           if (available > 0 || slowStockInfo) {
               processedCodes.add(code);
               const category = categorizeProduct(code, entry.name);
-              recommendations.push({
+              const take = Math.min(available, 2);
+              
+              rawRecommendations.push({
                   code: code,
                   name: entry.name,
                   category,
@@ -461,8 +549,13 @@ export const calculateRestockPlan = async (
                   targetStockQty: 0,
                   maxStock: 9999, 
                   needsRestock: 2,
-                  canPull: Math.min(available, 2),
-                  sourcing: [{ sourceWarehouse: wh.name, quantity: Math.min(available, 2) }],
+                  canPull: take,
+                  sourcing: [{ 
+                      sourceWarehouse: wh.name, 
+                      quantity: take,
+                      sourceStock: available 
+                  }],
+                  allWarehousesStock: [{ name: wh.name, stock: available }],
                   missingQuantity: 0,
                   status: 'Review',
                   isDiscontinued: false,
@@ -471,19 +564,21 @@ export const calculateRestockPlan = async (
                   displayInfo: undefined,
                   isTbaSolo: false,
                   shouldDisplay: true,
-                  slowStockInfo
+                  slowStockInfo,
+                  price: 0,
+                  revenue30Days: 0,
+                  abcClass: 'N',
+                  safetyStockAdjustment: 0
               });
           }
       }
   }
 
-  // 6. Handle Orphaned Slow Stock Items (In Slow File but not in BT or Warehouse)
+  // 6. Handle Orphaned Slow Stock Items
   for (const [code, entry] of slowStockMap.entries()) {
       if (processedCodes.has(code)) continue;
-      
-      // Probably discontinued or error, but user wants to see it
       processedCodes.add(code);
-      recommendations.push({
+      rawRecommendations.push({
             code: code,
             name: "Sản phẩm trong file tồn lâu (Không có ở BT)",
             category: "Khác",
@@ -499,22 +594,35 @@ export const calculateRestockPlan = async (
             needsRestock: 0,
             canPull: 0,
             sourcing: [],
+            allWarehousesStock: [],
             missingQuantity: 0,
             status: 'Review',
-            isDiscontinued: false, // assumption
+            isDiscontinued: false, 
             isNewArrival: false,
             urgency: 'Low',
             isTbaSolo: false,
             shouldDisplay: false,
-            slowStockInfo: entry
+            slowStockInfo: entry,
+            price: 0,
+            revenue30Days: 0,
+            abcClass: 'N',
+            safetyStockAdjustment: 0
       });
   }
 
-  recommendations.sort((a, b) => {
+  // 7. PERFORM ENTERPRISE ANALYSIS (ABC + FORECASTING)
+  const finalRecommendations = performABCAnalysis(rawRecommendations);
+
+  // 8. FINAL SORT
+  finalRecommendations.sort((a, b) => {
+      // Critical first
       if (a.urgency === 'Critical' && b.urgency !== 'Critical') return -1;
       if (a.urgency !== 'Critical' && b.urgency === 'Critical') return 1;
+      // Then by ABC Class (A -> B -> C)
+      if (a.abcClass !== b.abcClass) return a.abcClass.localeCompare(b.abcClass);
+      // Then by Need
       return b.needsRestock - a.needsRestock;
   });
 
-  return recommendations;
+  return finalRecommendations;
 };
