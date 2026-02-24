@@ -170,19 +170,52 @@ export const parseBTFile = async (file: File): Promise<Map<string, WarehouseItem
   const data = await readFileToJson(file);
   const itemMap = new Map<string, WarehouseItem>();
 
-  data.forEach((row: any[]) => {
-    if (!row || row.length < 3) return;
-    
-    const code = String(row[1] || '').trim().toUpperCase(); 
-    if (!code || code.includes('MÃ')) return; 
+  // Detect format
+  let isNewFormat = false;
+  if (data.length > 0) {
+      const firstRow = data[0] || [];
+      const headerA = String(firstRow[0] || '').toLowerCase();
+      // If column A is "mã sp" or similar, it's the new format
+      if (headerA.includes('mã') || headerA === 'code') {
+          isNewFormat = true;
+      }
+  }
 
-    const name = String(row[2] || ''); 
-    const currentStock = safeParseInt(row[4]); 
-    const price = safeParseFloat(row[5]); 
+  data.forEach((row: any[], index: number) => {
+    if (!row || row.length < 2) return;
     
-    let maxStock = 9999; 
-    if (row[24]) {
-        maxStock = safeParseInt(row[24]);
+    let code = '';
+    let name = '';
+    let currentStock = 0;
+    let maxStock = 9999;
+    let price = 0;
+    let pendingOrders = 0;
+    let ahCoefficient = 0;
+
+    if (isNewFormat) {
+        // New Format: A(0)=Mã, B(1)=Tên, K(10)=Xuất bán, M(12)=Tồn cuối, O(14)=Tồn Max, S(18)=Đơn treo, AH(33)=Hệ số
+        if (index === 0) return; // Skip header
+        code = String(row[0] || '').trim().toUpperCase();
+        if (!code || code.includes('MÃ')) return;
+        
+        name = String(row[1] || '');
+        currentStock = safeParseInt(row[12]); // M
+        maxStock = safeParseInt(row[14]) || 9999; // O
+        pendingOrders = safeParseInt(row[18]); // S
+        ahCoefficient = safeParseFloat(row[33]); // AH
+        price = 0; // Not specified in new format, default to 0
+    } else {
+        // Old Format: B(1)=Mã, C(2)=Tên, E(4)=Tồn, F(5)=Giá, Y(24)=Max
+        code = String(row[1] || '').trim().toUpperCase(); 
+        if (!code || code.includes('MÃ')) return; 
+
+        name = String(row[2] || ''); 
+        currentStock = safeParseInt(row[4]); 
+        price = safeParseFloat(row[5]); 
+        
+        if (row[24]) {
+            maxStock = safeParseInt(row[24]);
+        }
     }
 
     if (itemMap.has(code)) {
@@ -190,9 +223,10 @@ export const parseBTFile = async (file: File): Promise<Map<string, WarehouseItem
         itemMap.set(code, {
             ...existing,
             currentStock: existing.currentStock + currentStock,
+            pendingOrders: (existing.pendingOrders || 0) + pendingOrders,
         });
     } else {
-        itemMap.set(code, { code, name, currentStock, maxStock, price });
+        itemMap.set(code, { code, name, currentStock, maxStock, price, pendingOrders, ahCoefficient });
     }
   });
   return itemMap;
@@ -456,6 +490,49 @@ export const calculateRestockPlan = async (
       let need = Math.max(0, targetQty - currentStockBT);
       need = Math.min(need, spaceAvailable);
 
+      // --- NEW PULL LOGIC (LỰC BÁN) ---
+      const pendingOrders = btItem?.pendingOrders || 0;
+      const ahCoefficient = btItem?.ahCoefficient || 0;
+      
+      let velocityStatus: 'Hàng cực hot' | 'Bình thường' | 'Chậm' = 'Bình thường';
+      if (currentStockBT > 0 && sales > (currentStockBT * 0.5)) {
+          velocityStatus = 'Hàng cực hot';
+      } else if (sales === 0) {
+          velocityStatus = 'Chậm';
+      }
+
+      let pullReason = '';
+      let suggestedPull = need; // default to old logic
+      const effectiveStock = currentStockBT - pendingOrders;
+      const safeThreshold = velocityStatus === 'Hàng cực hot' ? (maxStock * 0.4) : 0;
+      
+      if (velocityStatus === 'Hàng cực hot' && effectiveStock < safeThreshold) {
+          pullReason = `BÁN CỰC CHẠY (K=${sales}, M=${currentStockBT}). Mức báo động.`;
+          suggestedPull = maxStock - currentStockBT + pendingOrders;
+      } else if (effectiveStock <= 0 && (currentStockBT > 0 || pendingOrders > 0)) {
+          pullReason = `Hết hàng hoặc Đơn treo cao (M=${currentStockBT}, S=${pendingOrders}).`;
+          suggestedPull = maxStock - currentStockBT + pendingOrders;
+      }
+
+      // Ensure we don't pull negative
+      if (suggestedPull < 0) suggestedPull = 0;
+
+      // AH Coefficient Check (Max 130)
+      if (suggestedPull > 0) {
+          if (ahCoefficient + suggestedPull > 130) {
+              const allowedPull = Math.max(0, 130 - ahCoefficient);
+              if (allowedPull < suggestedPull) {
+                  pullReason += ` TỪ CHỐI KÉO FULL: Hệ số AH hiện tại (${ahCoefficient}) sát mức trần 130. Chỉ kéo tối đa ${allowedPull} cái.`;
+                  suggestedPull = allowedPull;
+              }
+          }
+      }
+
+      // Override need with our new suggestedPull
+      if (suggestedPull > 0 && pullReason !== '') {
+          need = suggestedPull;
+      }
+
       // --- CRITICAL / SOURCING FIX ---
       let status: RestockRecommendation['status'] = 'Healthy';
       let urgency: RestockRecommendation['urgency'] = 'Normal';
@@ -542,7 +619,8 @@ export const calculateRestockPlan = async (
           isTbaSolo, shouldDisplay,
           displayInfo: display,
           slowStockInfo: slowInfo,
-          price, revenue30Days: 0, abcClass: 'N', safetyStockAdjustment: 0
+          price, revenue30Days: 0, abcClass: 'N', safetyStockAdjustment: 0,
+          pendingOrders, ahCoefficient, velocityStatus, pullReason
       });
   }
 

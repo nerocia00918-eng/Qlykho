@@ -24,7 +24,7 @@ interface SortConfig {
   direction: SortDirection;
 }
 
-type QuickFilterType = 'ALL' | 'CRITICAL' | 'NORMAL_RESTOCK' | 'NEW' | 'DISCONTINUED' | 'DISPLAY_CHECK' | 'SLOW_MOVING' | 'PROMO_CHECK' | 'ABC_A';
+type QuickFilterType = 'ALL' | 'CRITICAL' | 'NORMAL_RESTOCK' | 'NEW' | 'DISCONTINUED' | 'DISPLAY_CHECK' | 'SLOW_MOVING' | 'PROMO_CHECK' | 'ABC_A' | 'PULL_LOGIC';
 
 const STORAGE_KEY = 'SMARTSHEETS_DISPLAY_HISTORY';
 const DB_STATE_KEY = 'LATEST_CALCULATION';
@@ -563,6 +563,7 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
       discontinued: rawResults.filter(r => r.isDiscontinued).length,
       displayIssues: rawResults.filter(r => (r.shouldDisplay || r.isTbaSolo || (r.displayInfo?.condition === 'New' && getDaysDisplayed(r.displayInfo.startDate) > 20))).length,
       abcA: rawResults.filter(r => r.abcClass === 'A').length,
+      pullLogic: rawResults.filter(r => r.pullReason && r.pullReason !== '').length,
       total: rawResults.length
     };
   }, [rawResults]);
@@ -643,6 +644,7 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
             case 'DISCONTINUED': result = result.filter(r => r.isDiscontinued); break;
             case 'SLOW_MOVING': result = result.filter(r => !!r.slowStockInfo); break;
             case 'ABC_A': result = result.filter(r => r.abcClass === 'A'); break;
+            case 'PULL_LOGIC': result = result.filter(r => r.pullReason && r.pullReason !== ''); break;
             case 'DISPLAY_CHECK':
                 // Display check specific logic handled in filter loop? 
                 // Just keeping relevant items
@@ -773,8 +775,9 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
             ) : (
                 <>
                     {/* Stat Cards */}
-                    <div className="p-6 grid grid-cols-7 gap-2">
+                    <div className="p-6 grid grid-cols-8 gap-2">
                         <StatCard title="Nguy Cấp" value={stats.critical} subtext="Tồn 0 / Thấp" icon={AlertTriangle} colorClass="bg-red-600 text-red-500" active={quickFilter === 'CRITICAL'} onClick={() => setQuickFilter('CRITICAL')} />
+                        <StatCard title="Lệnh Kéo Hàng" value={stats.pullLogic} subtext="Lực bán cao" icon={Truck} colorClass="bg-blue-600 text-blue-500" active={quickFilter === 'PULL_LOGIC'} onClick={() => setQuickFilter('PULL_LOGIC')} />
                         <StatCard title="Cần Bổ Sung" value={stats.normalRestock} subtext="Kéo hàng" icon={ShoppingCart} colorClass="bg-yellow-500 text-yellow-500" active={quickFilter === 'NORMAL_RESTOCK'} onClick={() => setQuickFilter('NORMAL_RESTOCK')} />
                         <StatCard title="Nhóm A - Chủ Lực" value={stats.abcA} subtext="Top 80% Doanh Thu" icon={BarChart4} colorClass="bg-green-600 text-green-500" active={quickFilter === 'ABC_A'} onClick={() => setQuickFilter('ABC_A')} />
                         <StatCard title="Hàng Mới" value={stats.newArrivals} subtext="Chưa có kho này" icon={CheckCircle2} colorClass="bg-blue-500 text-blue-500" active={quickFilter === 'NEW'} onClick={() => setQuickFilter('NEW')} />
@@ -1031,6 +1034,11 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
                                                         <th className="px-4 py-4 text-center cursor-pointer hover:bg-gray-900" onClick={() => handleSort('needsRestock')}>
                                                              <div className="flex items-center justify-center space-x-1"><span>Dự Báo</span><ArrowUpDown className="w-3 h-3 text-gray-600" /></div>
                                                         </th>
+                                                        {quickFilter === 'PULL_LOGIC' && (
+                                                            <th className="px-4 py-4 text-left">
+                                                                <div className="flex items-center space-x-1"><span>Lực Bán & Lý Do</span></div>
+                                                            </th>
+                                                        )}
                                                         
                                                         {/* SOURCE FILTER HEADER */}
                                                         <th className="px-4 py-4 w-1/4">
@@ -1227,6 +1235,19 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ onClose }) => {
                                                                     )}
                                                                 </div>
                                                             </td>
+                                                            {quickFilter === 'PULL_LOGIC' && (
+                                                                <td className="px-4 py-4">
+                                                                    <div className="flex flex-col">
+                                                                        <span className={`text-xs font-bold px-2 py-0.5 rounded w-max mb-1 ${
+                                                                            r.velocityStatus === 'Hàng cực hot' ? 'bg-red-900 text-red-400' : 
+                                                                            r.velocityStatus === 'Chậm' ? 'bg-gray-800 text-gray-400' : 'bg-blue-900 text-blue-400'
+                                                                        }`}>
+                                                                            {r.velocityStatus}
+                                                                        </span>
+                                                                        <span className="text-[10px] text-gray-400 leading-tight">{r.pullReason}</span>
+                                                                    </div>
+                                                                </td>
+                                                            )}
                                                             <td className="px-6 py-4">
                                                                 <div className="flex flex-col gap-2">
                                                                     {sortedSources.length > 0 ? (

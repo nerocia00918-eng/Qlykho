@@ -37,8 +37,10 @@ export interface WarehouseItem {
   code: string;
   name: string;
   currentStock: number;
-  maxStock: number; // Column Y in BT
+  maxStock: number; // Column Y or O in BT
   price: number;
+  pendingOrders?: number; // Column S
+  ahCoefficient?: number; // Column AH
 }
 
 export interface SourcingPlan {
@@ -97,4 +99,10 @@ export interface RestockRecommendation {
   revenue30Days: number;
   abcClass: ABCClass;
   safetyStockAdjustment: number; // Suggested extra stock based on class
+
+  // NEW FIELDS FOR PULL LOGIC (LỰC BÁN)
+  pendingOrders: number; // S
+  ahCoefficient: number; // AH
+  velocityStatus: 'Hàng cực hot' | 'Bình thường' | 'Chậm';
+  pullReason: string;
 }
