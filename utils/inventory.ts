@@ -51,6 +51,113 @@ const safeParseFloat = (value: any): number => {
     return isNaN(parsed) ? 0 : parsed;
 };
 
+// Helper: Normalize headers for robust column mapping
+const normalizeHeader = (txt: string): string => {
+  if (!txt) return "";
+  return txt
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // Remove Vietnamese accents
+    .replace(/[^a-z0-9\s]/g, "")     // Remove special characters
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
+// Helper: Detect column indexes based on headers
+export const detectBTHeaders = (data: any[][]) => {
+  let bestRowIdx = 0;
+  let maxScore = -1;
+  
+  // Default fallbacks if header detection fails completely
+  let codeIdx = 1; // Col B
+  let nameIdx = 2; // Col C
+  let currentStockIdx = 4; // Col E
+  let priceIdx = 5; // Col F
+  let maxStockIdx = 24; // Col Y
+  let pendingOrdersIdx = -1;
+  let ahCoefficientIdx = -1;
+  
+  const searchLimit = Math.min(data.length, 15);
+  for (let r = 0; r < searchLimit; r++) {
+    const row = data[r];
+    if (!row || !Array.isArray(row)) continue;
+    
+    let tempCode = -1;
+    let tempName = -1;
+    let tempStock = -1;
+    let tempPrice = -1;
+    let tempMax = -1;
+    let tempPending = -1;
+    let tempAh = -1;
+    
+    let score = 0;
+    
+    row.forEach((cell, idx) => {
+      const txt = normalizeHeader(String(cell || ''));
+      if (!txt) return;
+      
+      if (["ma sp", "ma hang", "ma hh", "ma hang hoa", "code", "ma san pham", "ma"].includes(txt)) {
+        tempCode = idx;
+        score += 5;
+      }
+      else if (["ten sp", "ten hang", "ten hh", "ten hang hoa", "name", "ten san pham", "ten"].includes(txt)) {
+        tempName = idx;
+        score += 5;
+      }
+      else if (["don treo", "treo", "pending", "s"].includes(txt)) {
+        tempPending = idx;
+        score += 4;
+      }
+      else if (["he so", "ah"].includes(txt)) {
+        tempAh = idx;
+        score += 4;
+      }
+      else if (["ton max", "max stock", "ton toi da", "max", "o"].includes(txt)) {
+        tempMax = idx;
+        score += 3;
+      }
+      else if (["gia ban le", "gia le", "gia ban", "don gia", "price", "gia le niem yet", "gia"].includes(txt)) {
+        tempPrice = idx;
+        score += 3;
+      }
+      else if (["ton cuoi", "so luong", "thuc ton", "ton kho", "sl", "ton chinh", "ton", "m"].includes(txt)) {
+        tempStock = idx;
+        score += 3;
+      }
+    });
+    
+    if (tempCode !== -1 && (tempStock !== -1 || tempName !== -1)) {
+      if (tempStock === tempPrice && tempStock !== -1) {
+        tempPrice = -1;
+      }
+      
+      if (score > maxScore) {
+        maxScore = score;
+        bestRowIdx = r;
+        codeIdx = tempCode;
+        if (tempName !== -1) nameIdx = tempName;
+        if (tempStock !== -1) currentStockIdx = tempStock;
+        if (tempPrice !== -1) priceIdx = tempPrice;
+        if (tempMax !== -1) maxStockIdx = tempMax;
+        if (tempPending !== -1) pendingOrdersIdx = tempPending;
+        if (tempAh !== -1) ahCoefficientIdx = tempAh;
+      }
+    }
+  }
+  
+  return {
+    headerRowIndex: bestRowIdx,
+    codeIdx,
+    nameIdx,
+    currentStockIdx,
+    priceIdx,
+    maxStockIdx,
+    pendingOrdersIdx,
+    ahCoefficientIdx,
+    headerFound: maxScore > 0
+  };
+};
+
 const categorizeProduct = (code: string, name: string): string => {
   const c = code.trim().toUpperCase(); 
   
@@ -113,20 +220,19 @@ export const parseWarehouseFile = async (file: File): Promise<Map<string, WhEntr
       let tempCode = -1, tempStock = -1;
 
       row.forEach((cell, idx) => {
-          const txt = String(cell).toLowerCase().trim().replace(/\s+/g, ' '); 
-          if (txt.includes('mã sp') || txt.includes('mã hàng') || txt === 'mã') {
+          const txt = normalizeHeader(String(cell || '')); 
+          if (["ma sp", "ma hang", "ma hh", "ma hang hoa", "code", "ma san pham", "ma"].includes(txt)) {
               tempCode = idx; matchedCols++;
           }
-          if (txt === 'số lượng' || txt === 'tồn kho' || txt === 'tồn' || txt === 'sl' || txt === 'thực tồn') {
+          if (["ton cuoi", "so luong", "thuc ton", "ton kho", "sl", "ton chinh", "ton"].includes(txt)) {
               tempStock = idx; matchedCols++;
           }
-          if (txt === 'kho' || txt === 'tên kho') whIdx = idx;
+          if (txt === 'kho' || txt === 'ten kho' || txt === 'kho hang') whIdx = idx;
       });
       
       if (tempCode !== -1 && tempStock !== -1) {
           codeIdx = tempCode;
           stockIdx = tempStock;
-          // Look for name around code
           if (row[tempCode + 1]) nameIdx = tempCode + 1;
           headerFound = true;
           break;
@@ -170,53 +276,36 @@ export const parseBTFile = async (file: File): Promise<Map<string, WarehouseItem
   const data = await readFileToJson(file);
   const itemMap = new Map<string, WarehouseItem>();
 
-  // Detect format
-  let isNewFormat = false;
-  if (data.length > 0) {
-      const firstRow = data[0] || [];
-      const headerA = String(firstRow[0] || '').toLowerCase();
-      // If column A is "mã sp" or similar, it's the new format
-      if (headerA.includes('mã') || headerA === 'code') {
-          isNewFormat = true;
-      }
-  }
+  if (data.length === 0) return itemMap;
+
+  // Detect header positions dynamically
+  const mapping = detectBTHeaders(data);
 
   data.forEach((row: any[], index: number) => {
-    if (!row || row.length < 2) return;
+    if (!row || row.length === 0) return;
     
-    let code = '';
-    let name = '';
-    let currentStock = 0;
-    let maxStock = 9999;
-    let price = 0;
-    let pendingOrders = 0;
-    let ahCoefficient = 0;
+    // Skip header row
+    if (index === mapping.headerRowIndex) return;
 
-    if (isNewFormat) {
-        // New Format: A(0)=Mã, B(1)=Tên, K(10)=Xuất bán, M(12)=Tồn cuối, O(14)=Tồn Max, S(18)=Đơn treo, AH(33)=Hệ số
-        if (index === 0) return; // Skip header
-        code = String(row[0] || '').trim().toUpperCase();
-        if (!code || code.includes('MÃ')) return;
-        
-        name = String(row[1] || '');
-        currentStock = safeParseInt(row[12]); // M
-        maxStock = safeParseInt(row[14]) || 9999; // O
-        pendingOrders = safeParseInt(row[18]); // S
-        ahCoefficient = safeParseFloat(row[33]); // AH
-        price = 0; // Not specified in new format, default to 0
-    } else {
-        // Old Format: B(1)=Mã, C(2)=Tên, E(4)=Tồn, F(5)=Giá, Y(24)=Max
-        code = String(row[1] || '').trim().toUpperCase(); 
-        if (!code || code.includes('MÃ')) return; 
+    // Safety check: row must have enough elements for code index
+    if (row.length <= mapping.codeIdx) return;
 
-        name = String(row[2] || ''); 
-        currentStock = safeParseInt(row[4]); 
-        price = safeParseFloat(row[5]); 
-        
-        if (row[24]) {
-            maxStock = safeParseInt(row[24]);
-        }
-    }
+    const rawCode = String(row[mapping.codeIdx] || '').trim();
+    if (!rawCode) return;
+    
+    // Skip other potential header matching strings
+    const normalizedRaw = normalizeHeader(rawCode);
+    if (normalizedRaw.includes('ma sp') || normalizedRaw.includes('ma hang') || normalizedRaw.includes('ma san pham') || normalizedRaw === 'code') return;
+
+    const code = rawCode.replace(/[\u200B-\u200D\uFEFF]/g, '').trim().toUpperCase(); 
+    if (!code) return;
+
+    const name = mapping.nameIdx !== -1 && row[mapping.nameIdx] !== undefined ? String(row[mapping.nameIdx] || '') : '';
+    const currentStock = mapping.currentStockIdx !== -1 && row[mapping.currentStockIdx] !== undefined ? safeParseInt(row[mapping.currentStockIdx]) : 0;
+    const price = mapping.priceIdx !== -1 && row[mapping.priceIdx] !== undefined ? safeParseFloat(row[mapping.priceIdx]) : 0;
+    const maxStock = mapping.maxStockIdx !== -1 && row[mapping.maxStockIdx] !== undefined ? (safeParseInt(row[mapping.maxStockIdx]) || 9999) : 9999;
+    const pendingOrders = mapping.pendingOrdersIdx !== -1 && row[mapping.pendingOrdersIdx] !== undefined ? safeParseInt(row[mapping.pendingOrdersIdx]) : 0;
+    const ahCoefficient = mapping.ahCoefficientIdx !== -1 && row[mapping.ahCoefficientIdx] !== undefined ? safeParseFloat(row[mapping.ahCoefficientIdx]) : 0;
 
     if (itemMap.has(code)) {
         const existing = itemMap.get(code)!;
@@ -224,6 +313,8 @@ export const parseBTFile = async (file: File): Promise<Map<string, WarehouseItem
             ...existing,
             currentStock: existing.currentStock + currentStock,
             pendingOrders: (existing.pendingOrders || 0) + pendingOrders,
+            price: existing.price || price,
+            maxStock: existing.maxStock !== 9999 ? existing.maxStock : maxStock,
         });
     } else {
         itemMap.set(code, { code, name, currentStock, maxStock, price, pendingOrders, ahCoefficient });
@@ -232,17 +323,78 @@ export const parseBTFile = async (file: File): Promise<Map<string, WarehouseItem
   return itemMap;
 };
 
+// Helper: Detect stats/sales file headers
+export const detectStatsHeaders = (data: any[][]) => {
+  let bestRowIdx = 0;
+  let maxScore = -1;
+  
+  let codeIdx = 0; // default col A
+  let soldIdx = 10; // default col K (Index 10 is 'Xuất bán')
+  
+  const searchLimit = Math.min(data.length, 15);
+  for (let r = 0; r < searchLimit; r++) {
+    const row = data[r];
+    if (!row || !Array.isArray(row)) continue;
+    
+    let tempCode = -1;
+    let tempSold = -1;
+    let score = 0;
+    
+    row.forEach((cell, idx) => {
+      const txt = normalizeHeader(String(cell || ''));
+      if (!txt) return;
+      
+      if (["ma sp", "ma hang", "ma hh", "ma hang hoa", "code", "ma san pham", "ma"].includes(txt)) {
+        tempCode = idx;
+        score += 5;
+      }
+      else if (["xuat ban", "da ban", "so luong ban", "ban", "sold", "so luong"].includes(txt)) {
+        tempSold = idx;
+        score += 5;
+      }
+    });
+    
+    if (tempCode !== -1 && tempSold !== -1) {
+      if (score > maxScore) {
+        maxScore = score;
+        bestRowIdx = r;
+        codeIdx = tempCode;
+        soldIdx = tempSold;
+      }
+    }
+  }
+  
+  return {
+    headerRowIndex: bestRowIdx,
+    codeIdx,
+    soldIdx,
+    headerFound: maxScore > 0
+  };
+};
+
 export const parseStatsFile = async (file: File): Promise<Map<string, number>> => {
   const data = await readFileToJson(file);
   const stats = new Map<string, number>();
 
-  data.forEach((row: any[]) => {
-    if (!row || row.length < 1) return;
-    const code = String(row[0] || '').trim().toUpperCase();
-    if (!code || code.includes('MÃ')) return;
+  if (data.length === 0) return stats;
 
-    // Column K is Index 10
-    const sold = safeParseInt(row[10]); 
+  const mapping = detectStatsHeaders(data);
+
+  data.forEach((row: any[], index: number) => {
+    if (!row || row.length === 0) return;
+    if (index === mapping.headerRowIndex) return;
+
+    if (row.length <= mapping.codeIdx) return;
+    const rawCode = String(row[mapping.codeIdx] || '').trim();
+    if (!rawCode) return;
+
+    const normalizedRaw = normalizeHeader(rawCode);
+    if (normalizedRaw.includes('ma sp') || normalizedRaw.includes('ma hang') || normalizedRaw.includes('ma san pham') || normalizedRaw === 'code') return;
+
+    const code = rawCode.replace(/[\u200B-\u200D\uFEFF]/g, '').trim().toUpperCase(); 
+    if (!code) return;
+
+    const sold = mapping.soldIdx !== -1 && row[mapping.soldIdx] !== undefined ? safeParseInt(row[mapping.soldIdx]) : 0; 
     
     if (sold > 0) {
         const currentTotal = stats.get(code) || 0;
